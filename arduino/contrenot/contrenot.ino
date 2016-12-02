@@ -26,22 +26,23 @@ void do_encoder()
 {
     rot_val = digitalRead(ROTPINA);
     if(rot_val != rot_prev) {
-        outcount = count;
+        outcount = count & 127;
         count = 0;
     }
     rot_prev = rot_val;
     //do_stuff = 1;
 }
 
-void send_message(int16_t sp, int fsr, int rot)
+void send_message(int16_t sp, int fsr, int rot, int vel)
 {
-    uint8_t b[4];
+    uint8_t b[5];
     
     b[0] = 128 + (sp >> 9);
     b[1] = (sp >> 2) & 127;
     b[2] = ((sp << 5) & 127) + (fsr >> 5);
     b[3] = ((fsr << 2) & 127)  + rot;
-    Serial.write(b, 4);
+    b[4] = (vel & 127);
+    Serial.write(b, 5);
     //Serial.print(b[0]);
     //Serial.print(b[1]);
     //Serial.print(b[2]);
@@ -51,6 +52,7 @@ void send_message(int16_t sp, int fsr, int rot)
 void setup()
 {
     Serial.begin(115200);
+    //Serial.begin(230400);
     //Serial.begin(9600);
     ads1115.begin();
     pinMode(ROTPINA, INPUT);
@@ -95,7 +97,7 @@ void loop()
         //Serial.print(sp_val);
         //Serial.print(" ");
         //Serial.println(rot_val);
-        send_message(sp_val, outcount, rot_val);
+        send_message(sp_val, fsr_val, rot_val, outcount);
     }
 
     fsr_prev = fsr_val;

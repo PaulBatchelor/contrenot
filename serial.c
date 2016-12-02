@@ -12,9 +12,12 @@
 
 #include "wtable.h"
 
+#define MESSAGESIZE 5
+
 #define SERIALPORT "/dev/ttyACM0"
 
 #define BAUDRATE B115200
+//#define BAUDRATE B230400
 
 #define FSR_MAX 1
 #define SP_MAX 26100
@@ -35,11 +38,16 @@ typedef struct {
     speed_t brate;
     unsigned char b[4];
     SPFLOAT sp, fsr, rot, prot;
+    SPFLOAT vel;
     sp_ftbl *wtable;
     sp_tabread *wt;
 } serial_d;
 
-void do_bitwise_magic(unsigned char *b, int16_t *sp, int16_t *fsr, char *rot)
+void do_bitwise_magic(unsigned char *b, 
+        int16_t *sp, 
+        int16_t *fsr, 
+        char *rot,
+        unsigned char *vel)
 {
     *sp = ((b[0] - 128) << 9) +
         (b[1] << 2) +
@@ -49,6 +57,7 @@ void do_bitwise_magic(unsigned char *b, int16_t *sp, int16_t *fsr, char *rot)
         (b[3] >> 2);
 
     *rot = b[3] & 1;
+    *vel = b[4];
 }
 
 static int serial_data_init(serial_d *sd, const char *portname)
@@ -119,16 +128,16 @@ int main()
     int16_t sp = 0;
     int16_t fsr = 0;
     char rot = 0; 
+    unsigned char vel = 0;
     while(1) {
-        bytes = read(sd.fd, b, 4);
-        if(bytes >= 4 && (b[0] & 128)) {
-        //if(bytes >= 4) {
-        //if((b[0] & 128)) {
-            do_bitwise_magic(b, &sp, &fsr, &rot);
+        bytes = read(sd.fd, b, MESSAGESIZE);
+        if(bytes >= MESSAGESIZE && (b[0] & 128)) {
+            do_bitwise_magic(b, &sp, &fsr, &rot, &vel);
             sd.sp = (SPFLOAT)sp / SP_MAX;
             sd.fsr = (SPFLOAT)fsr / FSR_MAX;
             sd.rot = rot;
-            printf("%g\t%g\t%g\t%g\n",floor(sd.sp * 50), sd.sp, sd.fsr, sd.rot);
+            printf("%g\t%g\t%g\t%g\t%d\n",
+                floor(sd.sp * 50), sd.sp, sd.fsr, sd.rot, vel);
         } 
         usleep(100);
     }
@@ -168,6 +177,7 @@ int sporth_contrenot(plumber_data *pd, sporth_stack *stack, void **ud)
     int16_t sp = 0;
     int16_t fsr = 0;
     char rot = 0; 
+    unsigned char vel = 0; 
     int i;
     int nsize;
     char pnote;
@@ -177,7 +187,7 @@ int sporth_contrenot(plumber_data *pd, sporth_stack *stack, void **ud)
         case PLUMBER_CREATE: 
             sd = malloc(sizeof(serial_d));
 
-            if(sporth_check_args(stack, "sss") != SPORTH_OK) {
+            if(sporth_check_args(stack, "ssss") != SPORTH_OK) {
                 stack->error++;
                 fprintf(stderr, "Wrong args for contrenot!\n");
             }
@@ -189,16 +199,24 @@ int sporth_contrenot(plumber_data *pd, sporth_stack *stack, void **ud)
             *ud = sd;
             plumber_ftmap_delete(pd, 0);
 
-            /* rot */
+            /* velocity */
+            sd->vel = 0;
+            str = sporth_stack_pop_string(stack);
+            plumber_set_var(pd, str, &sd->vel);
+
+            /* rotation */
+            sd->rot = 0;
             str = sporth_stack_pop_string(stack);
             plumber_set_var(pd, str, &sd->rot);
 
             /* fsr */
+            sd->fsr = 0;
             str = sporth_stack_pop_string(stack);
             plumber_set_var(pd, str, &sd->fsr);
 
             /* soft pot */
 
+            sd->sp = 0;
             str = sporth_stack_pop_string(stack);
             plumber_set_var(pd, str, &sd->sp);
 
@@ -228,19 +246,21 @@ int sporth_contrenot(plumber_data *pd, sporth_stack *stack, void **ud)
             sporth_stack_pop_string(stack);
             sporth_stack_pop_string(stack);
             sporth_stack_pop_string(stack);
+            sporth_stack_pop_string(stack);
             break;
         case PLUMBER_COMPUTE: 
             sd = *ud;
-            bytes = read(sd->fd, b, 4);
-            if(bytes >= 4 && (b[0] & 128)) {
-                do_bitwise_magic(b, &sp, &fsr, &rot);
+            bytes = read(sd->fd, b, MESSAGESIZE);
+            if(bytes >= MESSAGESIZE && (b[0] & 128)) {
+                do_bitwise_magic(b, &sp, &fsr, &rot, &vel);
                 sd->sp = min(max(
                     ((SPFLOAT)sp / SP_MAX), 0.0), 1.0);
                 //sd->wt->index = 1 - sd->sp;
                 //sp_tabread_compute(pd->sp, sd->wt, NULL, &weight);
                 sd->sp = exp(((1 - sd->sp) * 7.0) - 7);
                 weight = floor(sd->sp * 1024);
-                sd->fsr = fsr;
+                sd->fsr = min((max(fsr - 400, 0) / 500.0), 1.0);
+                sd->vel = vel;
                 //printf("sp: %g weight: %g computed: %d fsr: %g\n", 
                 //    floor(sd->sp * 40), 
                 //    weight,

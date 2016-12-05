@@ -11,7 +11,7 @@ _freq get round 36.1 + mtof 0.1 port 0 phasor
 10 inv 1 sine 1 2 biscale *
 1 0 1 _saw tabread +
 
-1000 0.1 3 wpkorg35
+1000 _fsr get 0.1 1.8 scale 3 wpkorg35
 
 -10 ampdb * 
 _freq get round 36 + mtof 0.1 port 0.3 tri + 
